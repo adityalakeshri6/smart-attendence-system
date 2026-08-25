@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Start Session — Smart Attendance</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+  <h1>Smart Attendance</h1>
+  <div class="subtitle">Teacher — start a session & display QR</div>
+
+  <nav>
+    <a href="index.html">Admin</a>
+    <a href="session.html" class="active">Start Session</a>
+    <a href="scan.html">Scan (Student)</a>
+  </nav>
+
+  <div class="card" id="startCard">
+    <h2>Start a Session</h2>
+    <label>Course</label>
+    <select id="course"></select>
+    <button onclick="startSession()">Start Session</button>
+  </div>
+
+  <div class="card" id="liveCard" style="display:none;">
+    <h2>Session Live <span class="badge" id="statusBadge">ACTIVE</span></h2>
+    <div class="qr-wrap">
+      <img id="qrImg" src="" alt="QR Code" width="280">
+    </div>
+    <div class="timer" id="timer">--:--</div>
+    <div style="text-align:center;">
+      <button class="danger" onclick="closeSession()">Close Session</button>
+    </div>
+  </div>
+
+  <div class="card" id="attendanceCard" style="display:none;">
+    <div class="stat-row">
+      <div class="stat"><div class="num" id="presentCount">0</div><div class="label">Present</div></div>
+      <div class="stat"><div class="num" id="totalCount">0</div><div class="label">Total Students</div></div>
+    </div>
+    <h2>Live Attendance</h2>
+    <table>
+      <thead><tr><th>Roll</th><th>Name</th><th>Time</th></tr></thead>
+      <tbody id="attendanceBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const API = '/api';
+let sessionId = null;
+let expiresAt = null;
+let pollTimer = null;
+let countdownTimer = null;
+
+async function loadCourses() {
+  const res = await fetch(`${API}/courses`);
+  const courses = await res.json();
+  document.getElementById('course').innerHTML =
+    courses.map(c => `<option value="${c.course_id}">${c.name}</option>`).join('');
+}
+
+async function startSession() {
+  const course_id = document.getElementById('course').value;
+  if (!course_id) return alert('Add a course first from the Admin page.');
+  const res = await fetch(`${API}/sessions/start`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ course_id })
+  });
+  const data = await res.json();
+  sessionId = data.session_id;
+  expiresAt = new Date(data.expires_at);
+
+  document.getElementById('startCard').style.display = 'none';
+  document.getElementById('liveCard').style.display = 'block';
+  document.getElementById('attendanceCard').style.display = 'block';
+
+  await loadQr();
+  startCountdown();
+  pollTimer = setInterval(loadAttendance, 2000);
+  loadAttendance();
+}
+
+async function loadQr() {
+  const res = await fetch(`${API}/sessions/${sessionId}/qrcode`);
+  const data = await res.json();
+  document.getElementById('qrImg').src = data.dataUrl;
+}
+
+function startCountdown() {
+  clearInterval(countdownTimer);
+  countdownTimer = setInterval(() => {
+    const secondsLeft = Math.max(0, Math.floor((expiresAt - new Date()) / 1000));
+    const m = Math.floor(secondsLeft / 60).toString().padStart(2, '0');
+    const s = (secondsLeft % 60).toString().padStart(2, '0');
+    document.getElementById('timer').textContent = `${m}:${s}`;
+    if (secondsLeft <= 0) {
+      document.getElementById('statusBadge').textContent = 'EXPIRED';
+      clearInterval(countdownTimer);
+      clearInterval(pollTimer);
+    }
+  }, 1000);
+}
+
+async function loadAttendance() {
+  const res = await fetch(`${API}/sessions/${sessionId}/attendance`);
+  const data = await res.json();
+  document.getElementById('presentCount').textContent = data.present_count;
+  document.getElementById('totalCount').textContent = data.total_students;
+  document.getElementById('attendanceBody').innerHTML = data.present.map(p => `
+    <tr><td>${p.roll_no}</td><td>${p.name}</td><td>${p.scanned_at.split(' ')[1] || ''}</td></tr>
+  `).join('');
+}
+
+async function closeSession() {
+  await fetch(`${API}/sessions/${sessionId}/close`, { method: 'POST' });
+  document.getElementById('statusBadge').textContent = 'CLOSED';
+  clearInterval(pollTimer);
+  clearInterval(countdownTimer);
+}
+
+loadCourses();
+</script>
+</body>
+</html>
