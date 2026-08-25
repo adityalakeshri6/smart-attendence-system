@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scan — Smart Attendance</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+</head>
+<body>
+<div class="container">
+  <h1>Smart Attendance</h1>
+  <div class="subtitle">Student — scan the session QR to mark yourself present</div>
+
+  <nav>
+    <a href="index.html">Admin</a>
+    <a href="session.html">Start Session</a>
+    <a href="scan.html" class="active">Scan (Student)</a>
+  </nav>
+
+  <div class="card">
+    <h2>Your ID</h2>
+    <label>Paste your student token (given by admin, or from your ID QR)</label>
+    <input id="studentToken" placeholder="e.g. 9f2a1b...">
+    <button class="secondary" onclick="saveToken()">Save Token on this device</button>
+    <div id="tokenMsg"></div>
+  </div>
+
+  <div class="card">
+    <h2>Scan Session QR</h2>
+    <div id="reader"></div>
+    <div id="scanMsg"></div>
+  </div>
+</div>
+
+<script>
+const API = '/api';
+
+function saveToken() {
+  const token = document.getElementById('studentToken').value.trim();
+  if (!token) return;
+  localStorage.setItem('student_token', token);
+  document.getElementById('tokenMsg').innerHTML = `<div class="msg success">Saved. You can scan now.</div>`;
+}
+
+window.addEventListener('load', () => {
+  const saved = localStorage.getItem('student_token');
+  if (saved) document.getElementById('studentToken').value = saved;
+});
+
+let scanLocked = false;
+
+function onScanSuccess(decodedText) {
+  if (scanLocked) return;
+  let payload;
+  try {
+    payload = JSON.parse(decodedText);
+  } catch (e) {
+    return;
+  }
+  if (!payload.session_id || !payload.qr_token) return;
+
+  const student_token = localStorage.getItem('student_token');
+  if (!student_token) {
+    document.getElementById('scanMsg').innerHTML =
+      `<div class="msg error">Save your student token above first.</div>`;
+    return;
+  }
+
+  scanLocked = true;
+  markAttendance(payload.session_id, payload.qr_token, student_token);
+}
+
+async function markAttendance(session_id, qr_token, student_token) {
+  const msg = document.getElementById('scanMsg');
+  try {
+    const res = await fetch(`${API}/attendance/mark`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ session_id, qr_token, student_token })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      msg.innerHTML = `<div class="msg success">✅ ${data.message}</div>`;
+    } else {
+      msg.innerHTML = `<div class="msg error">${data.error}</div>`;
+    }
+  } catch (e) {
+    msg.innerHTML = `<div class="msg error">Network error. Try again.</div>`;
+  }
+  setTimeout(() => { scanLocked = false; }, 3000);
+}
+
+const html5QrCode = new Html5Qrcode("reader");
+Html5Qrcode.getCameras().then(cameras => {
+  if (cameras && cameras.length) {
+    const cameraId = cameras[cameras.length - 1].id;
+    html5QrCode.start(
+      cameraId,
+      { fps: 10, qrbox: 240 },
+      onScanSuccess
+    );
+  } else {
+    document.getElementById('scanMsg').innerHTML = `<div class="msg error">No camera found.</div>`;
+  }
+}).catch(err => {
+  document.getElementById('scanMsg').innerHTML = `<div class="msg error">Camera access denied or unavailable.</div>`;
+});
+</script>
+</body>
+</html>
