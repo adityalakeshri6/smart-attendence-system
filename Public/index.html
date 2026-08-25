@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin — Smart Attendance</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+  <h1>Smart Attendance</h1>
+  <div class="subtitle">Admin — manage courses & students</div>
+
+  <nav>
+    <a href="index.html" class="active">Admin</a>
+    <a href="session.html">Start Session</a>
+    <a href="scan.html">Scan (Student)</a>
+  </nav>
+
+  <div class="card">
+    <h2>Add Course</h2>
+    <label>Course name</label>
+    <input id="courseName" placeholder="e.g. BSc.CA Year 3">
+    <button onclick="addCourse()">Add Course</button>
+    <div id="courseMsg"></div>
+  </div>
+
+  <div class="card">
+    <h2>Add Student</h2>
+    <label>Course</label>
+    <select id="studentCourse"></select>
+    <label>Student name</label>
+    <input id="studentName" placeholder="e.g. Aditya Lakeshri">
+    <label>Roll number</label>
+    <input id="studentRoll" placeholder="e.g. 21">
+    <button onclick="addStudent()">Add Student</button>
+    <div id="studentMsg"></div>
+  </div>
+
+  <div class="card">
+    <h2>Students</h2>
+    <label>Filter by course</label>
+    <select id="filterCourse" onchange="loadStudents()"></select>
+    <table id="studentsTable">
+      <thead><tr><th>Roll</th><th>Name</th><th>QR (ID card)</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const API = '/api';
+
+async function loadCourses() {
+  const res = await fetch(`${API}/courses`);
+  const courses = await res.json();
+  const selects = [document.getElementById('studentCourse'), document.getElementById('filterCourse')];
+  selects.forEach(sel => {
+    sel.innerHTML = courses.map(c => `<option value="${c.course_id}">${c.name}</option>`).join('');
+  });
+  if (courses.length) loadStudents();
+}
+
+async function addCourse() {
+  const name = document.getElementById('courseName').value.trim();
+  const msg = document.getElementById('courseMsg');
+  if (!name) return;
+  const res = await fetch(`${API}/courses`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ name })
+  });
+  if (res.ok) {
+    msg.innerHTML = `<div class="msg success">Course added.</div>`;
+    document.getElementById('courseName').value = '';
+    loadCourses();
+  } else {
+    const err = await res.json();
+    msg.innerHTML = `<div class="msg error">${err.error}</div>`;
+  }
+}
+
+async function addStudent() {
+  const course_id = document.getElementById('studentCourse').value;
+  const name = document.getElementById('studentName').value.trim();
+  const roll_no = document.getElementById('studentRoll').value.trim();
+  const msg = document.getElementById('studentMsg');
+  if (!course_id || !name || !roll_no) {
+    msg.innerHTML = `<div class="msg error">Fill all fields, and add a course first.</div>`;
+    return;
+  }
+  const res = await fetch(`${API}/students`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ name, roll_no, course_id })
+  });
+  if (res.ok) {
+    msg.innerHTML = `<div class="msg success">Student added.</div>`;
+    document.getElementById('studentName').value = '';
+    document.getElementById('studentRoll').value = '';
+    loadStudents();
+  } else {
+    const err = await res.json();
+    msg.innerHTML = `<div class="msg error">${err.error}</div>`;
+  }
+}
+
+async function loadStudents() {
+  const course_id = document.getElementById('filterCourse').value;
+  if (!course_id) return;
+  const res = await fetch(`${API}/students?course_id=${course_id}`);
+  const students = await res.json();
+  const tbody = document.querySelector('#studentsTable tbody');
+  tbody.innerHTML = students.map(s => `
+    <tr>
+      <td>${s.roll_no}</td>
+      <td>${s.name}</td>
+      <td><button class="secondary" onclick="showIdQr(${s.student_id})">View QR ID</button></td>
+    </tr>
+  `).join('');
+}
+
+async function showIdQr(studentId) {
+  const res = await fetch(`${API}/students/${studentId}/qrcode`);
+  const data = await res.json();
+  const w = window.open('', '_blank', 'width=360,height=460');
+  w.document.write(`
+    <html><head><title>${data.name} — ID QR</title></head>
+    <body style="text-align:center;font-family:sans-serif;padding:20px;">
+      <h3>${data.name}</h3>
+      <p>Roll No: ${data.roll_no}</p>
+      <img src="${data.dataUrl}" style="width:260px;">
+      <p style="font-size:12px;color:#666;">Keep this private — it's your digital ID.</p>
+    </body></html>
+  `);
+}
+
+loadCourses();
+</script>
+</body>
+</html>
