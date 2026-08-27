@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Login — Smart Attendance</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+  <h1>Smart Attendance</h1>
+  <div class="subtitle">Institute login</div>
+
+  <div class="card" id="loginCard">
+    <h2>Log In</h2>
+    <label>Email</label>
+    <input id="loginEmail" type="email" placeholder="you@institute.com">
+    <label>Password</label>
+    <input id="loginPassword" type="password" placeholder="••••••••">
+    <button onclick="login()">Log In</button>
+    <div id="loginMsg"></div>
+    <p style="font-size:13px;margin-top:14px;">No account? <a href="#" onclick="showRegister();return false;">Register your institute</a></p>
+  </div>
+
+  <div class="card" id="registerCard" style="display:none;">
+    <h2>Register Institute</h2>
+    <label>Institute / coaching name</label>
+    <input id="regName" placeholder="e.g. ABC Coaching Classes">
+    <label>Email</label>
+    <input id="regEmail" type="email" placeholder="you@institute.com">
+    <label>Password</label>
+    <input id="regPassword" type="password" placeholder="At least 6 characters">
+    <button onclick="register()">Create Account</button>
+    <div id="registerMsg"></div>
+    <p style="font-size:13px;margin-top:14px;">Already have an account? <a href="#" onclick="showLogin();return false;">Log in</a></p>
+  </div>
+</div>
+
+<script>
+const API = '/api';
+
+if (localStorage.getItem('institute_token')) {
+  window.location.href = 'index.html';
+}
+
+function showRegister() {
+  document.getElementById('loginCard').style.display = 'none';
+  document.getElementById('registerCard').style.display = 'block';
+}
+function showLogin() {
+  document.getElementById('registerCard').style.display = 'none';
+  document.getElementById('loginCard').style.display = 'block';
+}
+
+async function login() {
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  const msg = document.getElementById('loginMsg');
+  if (!email || !password) return;
+  const res = await fetch(`${API}/auth/login`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ email, password })
+  });
+  const data = await res.json();
+  if (res.ok) {
+    localStorage.setItem('institute_token', data.token);
+    localStorage.setItem('institute_name', data.institute.name);
+    window.location.href = 'index.html';
+  } else {
+    msg.innerHTML = `<div class="msg error">${data.error}</div>`;
+  }
+}
+
+async function register() {
+  const institute_name = document.getElementById('regName').value.trim();
+  const email = document.getElementById('regEmail').value.trim();
+  const password = document.getElementById('regPassword').value;
+  const msg = document.getElementById('registerMsg');
+  if (!institute_name || !email || !password) {
+    msg.innerHTML = `<div class="msg error">Fill all fields.</div>`;
+    return;
+  }
+  const res = await fetch(`${API}/auth/register`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ institute_name, email, password })
+  });
+  const data = await res.json();
+  if (res.ok) {
+    localStorage.setItem('institute_token', data.token);
+    localStorage.setItem('institute_name', data.institute.name);
+    window.location.href = 'index.html';
+  } else {
+    msg.innerHTML = `<div class="msg error">${data.error}</div>`;
+  }
+}
+</script>
+</body>
+</html>
