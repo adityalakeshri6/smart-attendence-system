@@ -56,7 +56,7 @@ function onScanSuccess(decodedText) {
   try {
     payload = JSON.parse(decodedText);
   } catch (e) {
-    return;
+    return; // ignore unrelated QR codes
   }
   if (!payload.session_id || !payload.qr_token) return;
 
@@ -68,15 +68,27 @@ function onScanSuccess(decodedText) {
   }
 
   scanLocked = true;
-  markAttendance(payload.session_id, payload.qr_token, student_token);
+
+  // Try to get location — some sessions require it (anti-proxy geofence).
+  // If location isn't available, we still attempt the scan; the server only
+  // rejects it if that particular session actually requires location.
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => markAttendance(payload.session_id, payload.qr_token, student_token, pos.coords.latitude, pos.coords.longitude),
+      () => markAttendance(payload.session_id, payload.qr_token, student_token, null, null),
+      { timeout: 5000 }
+    );
+  } else {
+    markAttendance(payload.session_id, payload.qr_token, student_token, null, null);
+  }
 }
 
-async function markAttendance(session_id, qr_token, student_token) {
+async function markAttendance(session_id, qr_token, student_token, student_lat, student_lng) {
   const msg = document.getElementById('scanMsg');
   try {
     const res = await fetch(`${API}/attendance/mark`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ session_id, qr_token, student_token })
+      body: JSON.stringify({ session_id, qr_token, student_token, student_lat, student_lng })
     });
     const data = await res.json();
     if (res.ok) {
