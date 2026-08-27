@@ -15,12 +15,23 @@
     <a href="index.html">Admin</a>
     <a href="session.html" class="active">Start Session</a>
     <a href="scan.html">Scan (Student)</a>
+    <a href="#" onclick="logout();return false;" style="margin-left:auto;">Log Out</a>
   </nav>
 
   <div class="card" id="startCard">
     <h2>Start a Session</h2>
     <label>Course</label>
     <select id="course"></select>
+
+    <label style="display:flex;align-items:center;gap:8px;margin-top:16px;">
+      <input type="checkbox" id="useGeofence" style="width:auto;"> Require students to be physically nearby (anti-proxy)
+    </label>
+    <div id="geofenceOptions" style="display:none;">
+      <label>Allowed radius (meters)</label>
+      <input id="geofenceMeters" type="number" value="100" min="10">
+      <div id="locStatus" style="font-size:13px;color:#666;margin-top:6px;"></div>
+    </div>
+
     <button onclick="startSession()">Start Session</button>
   </div>
 
@@ -50,13 +61,51 @@
 
 <script>
 const API = '/api';
+const TOKEN = localStorage.getItem('institute_token');
+if (!TOKEN) window.location.href = 'login.html';
+const authHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${TOKEN}` };
+
+function logout() {
+  localStorage.removeItem('institute_token');
+  localStorage.removeItem('institute_name');
+  window.location.href = 'login.html';
+}
+
+async function apiFetch(url, options = {}) {
+  const res = await fetch(url, { ...options, headers: { ...authHeaders, ...(options.headers || {}) } });
+  if (res.status === 401) { logout(); throw new Error('session expired'); }
+  return res;
+}
+
 let sessionId = null;
 let expiresAt = null;
 let pollTimer = null;
 let countdownTimer = null;
+let teacherLocation = null;
+
+document.getElementById('useGeofence').addEventListener('change', (e) => {
+  document.getElementById('geofenceOptions').style.display = e.target.checked ? 'block' : 'none';
+  if (e.target.checked) getTeacherLocation();
+});
+
+function getTeacherLocation() {
+  const status = document.getElementById('locStatus');
+  status.textContent = 'Getting your location...';
+  if (!navigator.geolocation) {
+    status.textContent = 'Geolocation not supported on this browser.';
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      teacherLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      status.textContent = 'Location captured ✓';
+    },
+    (err) => { status.textContent = 'Could not get location: ' + err.message; }
+  );
+}
 
 async function loadCourses() {
-  const res = await fetch(`${API}/courses`);
+  const res = await apiFetch(`${API}/courses`);
   const courses = await res.json();
   document.getElementById('course').innerHTML =
     courses.map(c => `<option value="${c.course_id}">${c.name}</option>`).join('');
@@ -65,10 +114,17 @@ async function loadCourses() {
 async function startSession() {
   const course_id = document.getElementById('course').value;
   if (!course_id) return alert('Add a course first from the Admin page.');
-  const res = await fetch(`${API}/sessions/start`, {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ course_id })
-  });
+
+  const useGeofence = document.getElementById('useGeofence').checked;
+  const body = { course_id };
+  if (useGeofence) {
+    if (!teacherLocation) return alert('Waiting for your location — allow location access and try again.');
+    body.teacher_lat = teacherLocation.lat;
+    body.teacher_lng = teacherLocation.lng;
+    body.geofence_meters = parseInt(document.getElementById('geofenceMeters').value, 10) || 100;
+  }
+
+  const res = await apiFetch(`${API}/sessions/start`, { method: 'POST', body: JSON.stringify(body) });
   const data = await res.json();
   sessionId = data.session_id;
   expiresAt = new Date(data.expires_at);
@@ -84,7 +140,7 @@ async function startSession() {
 }
 
 async function loadQr() {
-  const res = await fetch(`${API}/sessions/${sessionId}/qrcode`);
+  const res = await apiFetch(`${API}/sessions/${sessionId}/qrcode`);
   const data = await res.json();
   document.getElementById('qrImg').src = data.dataUrl;
 }
@@ -105,7 +161,7 @@ function startCountdown() {
 }
 
 async function loadAttendance() {
-  const res = await fetch(`${API}/sessions/${sessionId}/attendance`);
+  const res = await apiFetch(`${API}/sessions/${sessionId}/attendance`);
   const data = await res.json();
   document.getElementById('presentCount').textContent = data.present_count;
   document.getElementById('totalCount').textContent = data.total_students;
@@ -115,7 +171,7 @@ async function loadAttendance() {
 }
 
 async function closeSession() {
-  await fetch(`${API}/sessions/${sessionId}/close`, { method: 'POST' });
+  await apiFetch(`${API}/sessions/${sessionId}/close`, { method: 'POST' });
   document.getElementById('statusBadge').textContent = 'CLOSED';
   clearInterval(pollTimer);
   clearInterval(countdownTimer);
