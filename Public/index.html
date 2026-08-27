@@ -9,12 +9,13 @@
 <body>
 <div class="container">
   <h1>Smart Attendance</h1>
-  <div class="subtitle">Admin — manage courses & students</div>
+  <div class="subtitle" id="whoami">Admin — manage courses & students</div>
 
   <nav>
     <a href="index.html" class="active">Admin</a>
     <a href="session.html">Start Session</a>
     <a href="scan.html">Scan (Student)</a>
+    <a href="#" onclick="logout();return false;" style="margin-left:auto;">Log Out</a>
   </nav>
 
   <div class="card">
@@ -41,6 +42,7 @@
     <h2>Students</h2>
     <label>Filter by course</label>
     <select id="filterCourse" onchange="loadStudents()"></select>
+    <button class="secondary" onclick="downloadReport()">Download Attendance Report (CSV)</button>
     <table id="studentsTable">
       <thead><tr><th>Roll</th><th>Name</th><th>QR (ID card)</th></tr></thead>
       <tbody></tbody>
@@ -50,9 +52,28 @@
 
 <script>
 const API = '/api';
+const TOKEN = localStorage.getItem('institute_token');
+if (!TOKEN) window.location.href = 'login.html';
+
+const authHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${TOKEN}` };
+
+function logout() {
+  localStorage.removeItem('institute_token');
+  localStorage.removeItem('institute_name');
+  window.location.href = 'login.html';
+}
+
+document.getElementById('whoami').textContent =
+  `Admin — ${localStorage.getItem('institute_name') || ''}`;
+
+async function apiFetch(url, options = {}) {
+  const res = await fetch(url, { ...options, headers: { ...authHeaders, ...(options.headers || {}) } });
+  if (res.status === 401) { logout(); throw new Error('session expired'); }
+  return res;
+}
 
 async function loadCourses() {
-  const res = await fetch(`${API}/courses`);
+  const res = await apiFetch(`${API}/courses`);
   const courses = await res.json();
   const selects = [document.getElementById('studentCourse'), document.getElementById('filterCourse')];
   selects.forEach(sel => {
@@ -65,10 +86,7 @@ async function addCourse() {
   const name = document.getElementById('courseName').value.trim();
   const msg = document.getElementById('courseMsg');
   if (!name) return;
-  const res = await fetch(`${API}/courses`, {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ name })
-  });
+  const res = await apiFetch(`${API}/courses`, { method: 'POST', body: JSON.stringify({ name }) });
   if (res.ok) {
     msg.innerHTML = `<div class="msg success">Course added.</div>`;
     document.getElementById('courseName').value = '';
@@ -88,9 +106,8 @@ async function addStudent() {
     msg.innerHTML = `<div class="msg error">Fill all fields, and add a course first.</div>`;
     return;
   }
-  const res = await fetch(`${API}/students`, {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ name, roll_no, course_id })
+  const res = await apiFetch(`${API}/students`, {
+    method: 'POST', body: JSON.stringify({ name, roll_no, course_id })
   });
   if (res.ok) {
     msg.innerHTML = `<div class="msg success">Student added.</div>`;
@@ -106,7 +123,7 @@ async function addStudent() {
 async function loadStudents() {
   const course_id = document.getElementById('filterCourse').value;
   if (!course_id) return;
-  const res = await fetch(`${API}/students?course_id=${course_id}`);
+  const res = await apiFetch(`${API}/students?course_id=${course_id}`);
   const students = await res.json();
   const tbody = document.querySelector('#studentsTable tbody');
   tbody.innerHTML = students.map(s => `
@@ -119,7 +136,7 @@ async function loadStudents() {
 }
 
 async function showIdQr(studentId) {
-  const res = await fetch(`${API}/students/${studentId}/qrcode`);
+  const res = await apiFetch(`${API}/students/${studentId}/qrcode`);
   const data = await res.json();
   const w = window.open('', '_blank', 'width=360,height=460');
   w.document.write(`
@@ -131,6 +148,21 @@ async function showIdQr(studentId) {
       <p style="font-size:12px;color:#666;">Keep this private — it's your digital ID.</p>
     </body></html>
   `);
+}
+
+function downloadReport() {
+  const course_id = document.getElementById('filterCourse').value;
+  if (!course_id) return alert('Pick a course first.');
+  fetch(`${API}/courses/${course_id}/report.csv`, { headers: authHeaders })
+    .then(res => res.blob())
+    .then(blob => {
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `attendance-report-course-${course_id}.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    });
 }
 
 loadCourses();
