@@ -83,6 +83,13 @@ let pollTimer = null;
 let countdownTimer = null;
 let teacherLocation = null;
 
+// The server stores timestamps in UTC without a timezone marker.
+// Parse it explicitly as UTC, then let the browser display it in the viewer's local time.
+function formatLocalTime(sqliteUtcString) {
+  const utcDate = new Date(sqliteUtcString.replace(' ', 'T') + 'Z');
+  return utcDate.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
 document.getElementById('useGeofence').addEventListener('change', (e) => {
   document.getElementById('geofenceOptions').style.display = e.target.checked ? 'block' : 'none';
   if (e.target.checked) getTeacherLocation();
@@ -166,7 +173,7 @@ async function loadAttendance() {
   document.getElementById('presentCount').textContent = data.present_count;
   document.getElementById('totalCount').textContent = data.total_students;
   document.getElementById('attendanceBody').innerHTML = data.present.map(p => `
-    <tr><td>${p.roll_no}</td><td>${p.name}</td><td>${p.scanned_at.split(' ')[1] || ''}</td></tr>
+    <tr><td>${p.roll_no}</td><td>${p.name}</td><td>${formatLocalTime(p.scanned_at)}</td></tr>
   `).join('');
 }
 
