@@ -43,9 +43,21 @@ function saveToken() {
   document.getElementById('tokenMsg').innerHTML = `<div class="msg success">Saved. You can scan now.</div>`;
 }
 
+// Auto-save if opened via a personal link (scan.html?token=...), which the
+// admin shares once per student — this removes the manual copy-paste step.
+// Otherwise, pre-fill from whatever was already saved on this device.
 window.addEventListener('load', () => {
-  const saved = localStorage.getItem('student_token');
-  if (saved) document.getElementById('studentToken').value = saved;
+  const urlToken = new URLSearchParams(window.location.search).get('token');
+  if (urlToken) {
+    localStorage.setItem('student_token', urlToken);
+    document.getElementById('studentToken').value = urlToken;
+    document.getElementById('tokenMsg').innerHTML = `<div class="msg success">Your ID was saved automatically. You're ready to scan.</div>`;
+    // Clean the token out of the visible URL/history for privacy
+    window.history.replaceState({}, '', window.location.pathname);
+  } else {
+    const saved = localStorage.getItem('student_token');
+    if (saved) document.getElementById('studentToken').value = saved;
+  }
 });
 
 let scanLocked = false;
@@ -93,19 +105,37 @@ async function markAttendance(session_id, qr_token, student_token, student_lat, 
     const data = await res.json();
     if (res.ok) {
       msg.innerHTML = `<div class="msg success">✅ ${data.message}</div>`;
+      await stopScanner(); // success — no need to keep the camera running
     } else {
       msg.innerHTML = `<div class="msg error">${data.error}</div>`;
+      if (res.status === 409) {
+        // "already marked" — also a terminal state, stop scanning
+        await stopScanner();
+      } else {
+        // a real error (expired QR, wrong course, etc) — let them try again
+        scanLocked = false;
+      }
     }
   } catch (e) {
     msg.innerHTML = `<div class="msg error">Network error. Try again.</div>`;
+    scanLocked = false;
   }
-  setTimeout(() => { scanLocked = false; }, 3000);
+}
+
+async function stopScanner() {
+  try {
+    await html5QrCode.stop();
+    document.getElementById('reader').innerHTML =
+      '<div style="text-align:center;padding:24px;color:#666;">Camera stopped. Refresh this page to scan again for a new session.</div>';
+  } catch (e) {
+    // camera may already be stopped — safe to ignore
+  }
 }
 
 const html5QrCode = new Html5Qrcode("reader");
 Html5Qrcode.getCameras().then(cameras => {
   if (cameras && cameras.length) {
-    const cameraId = cameras[cameras.length - 1].id;
+    const cameraId = cameras[cameras.length - 1].id; // prefer back camera if present
     html5QrCode.start(
       cameraId,
       { fps: 10, qrbox: 240 },
