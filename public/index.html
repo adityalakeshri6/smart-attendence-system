@@ -43,8 +43,12 @@
     <label>Filter by course</label>
     <select id="filterCourse" onchange="loadStudents()"></select>
     <button class="secondary" onclick="downloadReport()">Download Attendance Report (CSV)</button>
+    <p style="font-size:13px;color:#666;margin-top:10px;">
+      Tap <b>Copy Link</b> next to a student and send it to them once via WhatsApp/SMS —
+      opening it on their phone saves their ID automatically, no typing needed.
+    </p>
     <table id="studentsTable">
-      <thead><tr><th>Roll</th><th>Name</th><th>QR (ID card)</th></tr></thead>
+      <thead><tr><th>Roll</th><th>Name</th><th>Attendance Link</th></tr></thead>
       <tbody></tbody>
     </table>
   </div>
@@ -130,9 +134,26 @@ async function loadStudents() {
     <tr>
       <td>${s.roll_no}</td>
       <td>${s.name}</td>
-      <td><button class="secondary" onclick="showIdQr(${s.student_id})">View QR ID</button></td>
+      <td>
+        <button class="secondary" onclick="copyStudentLink('${s.student_token}', this)">Copy Link</button>
+        <button class="secondary" onclick="showIdQr(${s.student_id})">View QR ID</button>
+      </td>
     </tr>
   `).join('');
+}
+
+// Generates a one-time personal link for this student. When they open it on
+// their own phone, their token is saved automatically — no manual copy-paste,
+// no third-party QR app needed. Share this via WhatsApp/SMS once per student.
+function copyStudentLink(token, btn) {
+  const link = `${window.location.origin}/scan.html?token=${token}`;
+  navigator.clipboard.writeText(link).then(() => {
+    const original = btn.textContent;
+    btn.textContent = 'Copied ✓';
+    setTimeout(() => { btn.textContent = original; }, 1500);
+  }).catch(() => {
+    prompt('Copy this link manually:', link);
+  });
 }
 
 async function showIdQr(studentId) {
