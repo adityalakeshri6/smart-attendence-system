@@ -1,8 +1,15 @@
 const jwt = require('jsonwebtoken');
 
-// In production, set JWT_SECRET as an environment variable (Railway → Variables tab).
-// Falls back to a default only for local testing.
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
+// JWT_SECRET must be set as an environment variable (Railway → Variables tab).
+// No fallback: if this is missing, the app refuses to start rather than
+// silently running with a guessable secret.
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error(
+    'JWT_SECRET environment variable is not set. ' +
+    'Set it in Railway → your service → Variables before starting the app.'
+  );
+}
 
 function signToken(institute) {
   return jwt.sign(
