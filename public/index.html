@@ -44,8 +44,8 @@
     <select id="filterCourse" onchange="loadStudents()"></select>
     <button class="secondary" onclick="downloadReport()">Download Attendance Report (CSV)</button>
     <p style="font-size:13px;color:#666;margin-top:10px;">
-      Tap <b>Copy Link</b> next to a student and send it to them once via WhatsApp/SMS —
-      opening it on their phone saves their ID automatically, no typing needed.
+      Tap <b>Copy Attendance Link</b> and send it to the student once via WhatsApp/SMS —
+      opening it on their phone sets them up permanently, nothing to type.
     </p>
     <table id="studentsTable">
       <thead><tr><th>Roll</th><th>Name</th><th>Attendance Link</th></tr></thead>
@@ -135,8 +135,7 @@ async function loadStudents() {
       <td>${s.roll_no}</td>
       <td>${s.name}</td>
       <td>
-        <button class="secondary" onclick="copyStudentLink('${s.student_token}', this)">Copy Link</button>
-        <button class="secondary" onclick="showIdQr(${s.student_id})">View QR ID</button>
+        <button onclick="copyStudentLink('${s.student_token}', this)">Copy Attendance Link</button>
       </td>
     </tr>
   `).join('');
@@ -154,21 +153,6 @@ function copyStudentLink(token, btn) {
   }).catch(() => {
     prompt('Copy this link manually:', link);
   });
-}
-
-async function showIdQr(studentId) {
-  const res = await apiFetch(`${API}/students/${studentId}/qrcode`);
-  const data = await res.json();
-  const w = window.open('', '_blank', 'width=360,height=460');
-  w.document.write(`
-    <html><head><title>${data.name} — ID QR</title></head>
-    <body style="text-align:center;font-family:sans-serif;padding:20px;">
-      <h3>${data.name}</h3>
-      <p>Roll No: ${data.roll_no}</p>
-      <img src="${data.dataUrl}" style="width:260px;">
-      <p style="font-size:12px;color:#666;">Keep this private — it's your digital ID.</p>
-    </body></html>
-  `);
 }
 
 function downloadReport() {
