@@ -4,44 +4,66 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const QRCode = require('qrcode');
 const path = require('path');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const db = require('./db');
 const { signToken, requireAuth } = require('./auth');
 const { distanceMeters } = require('./geo');
+const { isValidEmail, isNonEmptyString, isValidCoordinate, isPositiveInt } = require('./validate');
 
 const app = express();
+app.use(helmet());
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 const SESSION_MINUTES = 10; // QR code validity window
 
+// Rate limit login/register only — generous enough that a real user mistyping
+// their password a few times never gets blocked, but stops automated guessing.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many attempts. Please wait a few minutes and try again.' }
+});
+
 // ================= AUTH =================
-app.post('/api/auth/register', async (req, res) => {
+app.post('/api/auth/register', authLimiter, async (req, res) => {
   const { institute_name, email, password } = req.body;
-  if (!institute_name || !email || !password) {
-    return res.status(400).json({ error: 'institute_name, email, password are required' });
+  if (!isNonEmptyString(institute_name, 200)) {
+    return res.status(400).json({ error: 'institute_name is required' });
   }
-  if (password.length < 6) {
-    return res.status(400).json({ error: 'password must be at least 6 characters' });
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ error: 'a valid email is required' });
   }
-  const existing = db.prepare('SELECT institute_id FROM institutes WHERE email = ?').get(email);
+  if (typeof password !== 'string' || password.length < 6 || password.length > 128) {
+    return res.status(400).json({ error: 'password must be between 6 and 128 characters' });
+  }
+  const normalizedEmail = email.trim().toLowerCase();
+
+  const existing = db.prepare('SELECT institute_id FROM institutes WHERE email = ?').get(normalizedEmail);
   if (existing) return res.status(409).json({ error: 'an account with this email already exists' });
 
   const password_hash = await bcrypt.hash(password, 10);
   const stmt = db.prepare(
     'INSERT INTO institutes (name, email, password_hash) VALUES (?, ?, ?)'
   );
-  const result = stmt.run(institute_name, email, password_hash);
-  const institute = { institute_id: result.lastInsertRowid, email, name: institute_name };
+  const result = stmt.run(institute_name.trim(), normalizedEmail, password_hash);
+  const institute = { institute_id: result.lastInsertRowid, email: normalizedEmail, name: institute_name.trim() };
   const token = signToken(institute);
-  res.json({ token, institute: { institute_id: institute.institute_id, name: institute_name, email } });
+  res.json({ token, institute: { institute_id: institute.institute_id, name: institute.name, email: normalizedEmail } });
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', authLimiter, async (req, res) => {
   const { email, password } = req.body;
-  if (!email || !password) return res.status(400).json({ error: 'email and password are required' });
+  if (!isValidEmail(email) || typeof password !== 'string' || !password) {
+    return res.status(400).json({ error: 'email and password are required' });
+  }
+  const normalizedEmail = email.trim().toLowerCase();
 
-  const institute = db.prepare('SELECT * FROM institutes WHERE email = ?').get(email);
+  const institute = db.prepare('SELECT * FROM institutes WHERE email = ?').get(normalizedEmail);
   if (!institute) return res.status(401).json({ error: 'invalid email or password' });
 
   const valid = await bcrypt.compare(password, institute.password_hash);
@@ -54,10 +76,10 @@ app.post('/api/auth/login', async (req, res) => {
 // ================= COURSES (protected, scoped to institute) =================
 app.post('/api/courses', requireAuth, (req, res) => {
   const { name } = req.body;
-  if (!name) return res.status(400).json({ error: 'name is required' });
+  if (!isNonEmptyString(name, 200)) return res.status(400).json({ error: 'a valid course name is required' });
   const stmt = db.prepare('INSERT INTO courses (institute_id, name) VALUES (?, ?)');
-  const result = stmt.run(req.institute_id, name);
-  res.json({ course_id: result.lastInsertRowid, name });
+  const result = stmt.run(req.institute_id, name.trim());
+  res.json({ course_id: result.lastInsertRowid, name: name.trim() });
 });
 
 app.get('/api/courses', requireAuth, (req, res) => {
@@ -74,8 +96,8 @@ function courseBelongsToInstitute(course_id, institute_id) {
 // ================= STUDENTS (protected) =================
 app.post('/api/students', requireAuth, (req, res) => {
   const { name, roll_no, course_id } = req.body;
-  if (!name || !roll_no || !course_id) {
-    return res.status(400).json({ error: 'name, roll_no, course_id are required' });
+  if (!isNonEmptyString(name, 200) || !isNonEmptyString(String(roll_no ?? ''), 50) || !isPositiveInt(Number(course_id))) {
+    return res.status(400).json({ error: 'a valid name, roll_no, and course_id are required' });
   }
   if (!courseBelongsToInstitute(course_id, req.institute_id)) {
     return res.status(403).json({ error: 'course not found for this institute' });
@@ -85,8 +107,8 @@ app.post('/api/students', requireAuth, (req, res) => {
     const stmt = db.prepare(
       'INSERT INTO students (name, roll_no, course_id, student_token) VALUES (?, ?, ?, ?)'
     );
-    const result = stmt.run(name, roll_no, course_id, student_token);
-    res.json({ student_id: result.lastInsertRowid, name, roll_no, course_id, student_token });
+    const result = stmt.run(name.trim(), String(roll_no).trim(), course_id, student_token);
+    res.json({ student_id: result.lastInsertRowid, name: name.trim(), roll_no: String(roll_no).trim(), course_id, student_token });
   } catch (err) {
     if (err.message.includes('UNIQUE')) {
       return res.status(409).json({ error: 'roll_no already exists in this course' });
@@ -108,9 +130,12 @@ app.get('/api/students', requireAuth, (req, res) => {
 // ================= SESSIONS (protected to start/manage) =================
 app.post('/api/sessions/start', requireAuth, (req, res) => {
   const { course_id, teacher_lat, teacher_lng, geofence_meters } = req.body;
-  if (!course_id) return res.status(400).json({ error: 'course_id is required' });
+  if (!isPositiveInt(Number(course_id))) return res.status(400).json({ error: 'a valid course_id is required' });
   if (!courseBelongsToInstitute(course_id, req.institute_id)) {
     return res.status(403).json({ error: 'course not found for this institute' });
+  }
+  if (geofence_meters != null && !isValidCoordinate(teacher_lat, teacher_lng)) {
+    return res.status(400).json({ error: 'valid teacher_lat/teacher_lng are required when setting a geofence' });
   }
 
   const qr_token = crypto.randomBytes(12).toString('hex');
@@ -203,12 +228,12 @@ app.post('/api/attendance/mark', (req, res) => {
 
   // Anti-proxy: geofence check, only enforced if the teacher set a radius when starting the session
   if (session.geofence_meters && session.teacher_lat != null && session.teacher_lng != null) {
-    if (student_lat == null || student_lng == null) {
-      return res.status(400).json({ error: 'location is required for this session' });
+    if (!isValidCoordinate(student_lat, student_lng)) {
+      return res.status(400).json({ error: 'Location permission is required for this session.' });
     }
     const dist = distanceMeters(session.teacher_lat, session.teacher_lng, student_lat, student_lng);
     if (dist > session.geofence_meters) {
-      return res.status(403).json({ error: `You appear to be too far from the classroom (${Math.round(dist)}m away).` });
+      return res.status(403).json({ error: 'You are outside the classroom attendance area.' });
     }
   }
 
